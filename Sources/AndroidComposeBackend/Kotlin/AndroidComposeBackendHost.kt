@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.mutableIntStateOf
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -27,9 +28,10 @@ object AndroidComposeBackendHost {
     val nodes: SnapshotStateMap<Int, WidgetNode> = mutableStateMapOf()
 
     /** The ID of the top-level node Swift wants rendered. -1 = nothing yet. */
-    @Volatile
-    var rootNodeId: Int = -1
-        private set
+    private val _rootNodeId = mutableIntStateOf(-1)
+    var rootNodeId: Int
+        get() = _rootNodeId.value
+        private set(value) { _rootNodeId.value = value }
 
     private val mainHandler = Handler(Looper.getMainLooper())
 

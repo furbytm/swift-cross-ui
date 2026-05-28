@@ -1,5 +1,6 @@
 package dev.swiftcrossui.compose
 
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,23 +20,28 @@ import androidx.compose.ui.Alignment
  */
 @Composable
 fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
-    val node = nodes[nodeId] ?: return
+    val node = nodes[nodeId]!!
+    
+    Log.d("render", "RenderNode: id=$nodeId found=${node.type} properties=${node.properties}")
 
     when (node.type) {
 
-        WidgetType.CONTAINER -> {
+        "Container" -> {
             Box {
                 node.children.forEachIndexed { index, childId ->
                     val (x, y) = node.childPositions[index] ?: (0 to 0)
-                    Box(modifier = Modifier.offset(x.dp, y.dp)) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         RenderNode(childId, nodes)
                     }
                 }
             }
         }
 
-        WidgetType.TEXT -> {
-            val text = node.prop(PropKey.TEXT) ?: ""
+        "Text" -> {
+            val text = node.prop("text") ?: ""
             val fontSize = node.prop(PropKey.FONT_SIZE)?.toIntOrNull()
             val fontWeight = when (node.prop(PropKey.FONT_WEIGHT)) {
                 "bold"   -> FontWeight.Bold
@@ -53,7 +59,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             )
         }
 
-        WidgetType.BUTTON -> {
+        "Button" -> {
             val label = node.prop(PropKey.LABEL) ?: ""
             val enabled = node.prop(PropKey.ENABLED) != "false"
             Button(
@@ -64,7 +70,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
         }
 
-        WidgetType.TEXT_FIELD -> {
+        "TextField" -> {
             // Local draft state so the field feels responsive while Swift processes
             // the change event asynchronously.
             var draft by remember(nodeId) {
@@ -89,7 +95,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             )
         }
 
-        WidgetType.TOGGLE -> {
+        "Toggle" -> {
             var checked by remember(nodeId) {
                 mutableStateOf(node.prop(PropKey.VALUE) == "true")
             }
@@ -115,7 +121,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
         }
 
-        WidgetType.SLIDER -> {
+        "Slider" -> {
             var value by remember(nodeId) {
                 mutableStateOf(node.prop(PropKey.VALUE)?.toFloatOrNull() ?: 0f)
             }

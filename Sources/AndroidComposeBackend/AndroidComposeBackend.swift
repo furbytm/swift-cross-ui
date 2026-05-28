@@ -23,21 +23,17 @@ private struct EventHandlers {
 }
 
 /// Decoded event from the JSON queue.
-private struct IncomingEvent {
+private struct IncomingEvent: Decodable {
     let id: Int32
     let type: String
     let payload: String
 
     init?(_ json: String) {
-        guard let idRange    = json.range(of: #"(?<="id":)\d+"#,  options: .regularExpression),
-              let typeRange  = json.range(of: #"(?<="type":")\w+"#, options: .regularExpression),
-              let payRange   = json.range(of: #"(?<="payload":")(.*?)(?=")"#, options: .regularExpression)
+        guard
+            let data  = json.data(using: .utf8),
+            let event = try? JSONDecoder().decode(IncomingEvent.self, from: data)
         else { return nil }
-
-        guard let idVal = Int32(json[idRange]) else { return nil }
-        self.id      = idVal
-        self.type    = String(json[typeRange])
-        self.payload = String(json[payRange])
+        self = event
     }
 }
 
@@ -222,8 +218,10 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         window: Window,
         rootEnvironment: EnvironmentValues
     ) -> EnvironmentValues {
-        let environment = rootEnvironment
-        // environment.windowScaleFactor = Double(window.content!.getResources().getDisplayMetrics().density)
+        var environment = rootEnvironment
+        if let metrics = Self.activity.getResources().getDisplayMetrics() {
+            environment.windowScaleFactor = Double(metrics.density)
+        }
         return environment
     }
   
@@ -239,9 +237,13 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
   
     public func size(ofWindow window: Window) -> SIMD2<Int> {
-        let width = 100
-        let height = 100
-        return SIMD2(Int(width), Int(height))
+        guard let metrics = Self.activity.getResources().getDisplayMetrics() else {
+            return SIMD2(360, 800) // sensible dp fallback
+        }
+        let density  = Double(metrics.density)
+        let widthDp  = Int((Double(metrics.widthPixels)  / density).rounded(.down))
+        let heightDp = Int((Double(metrics.heightPixels) / density).rounded(.down))
+        return SIMD2(widthDp, heightDp)
     }
   
     public func updateWindow(_ window: Window, environment: EnvironmentValues) {
@@ -256,16 +258,18 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     public func show(widget: Widget) {}
   
     public func setChild(ofWindow window: Window, to child: Widget) {
+        log("setChild called with child=\(child)")
         let container = createContainer()
+        log("created container=\(container)")
         insert(child, into: container, at: 0)
-        // Self.activity.setContentView(container)
         window.content = container
-        // updateInsets(ofWindow: window)
+        setRootWidget(container)
+        log("setRootWidget called with container=\(container)")
     }
 
     public func createContainer() -> Widget {
         let id = allocateId()
-        try? bridge.createNode(id: id, type: "Container")
+        bridgeCall("createNode Container \(id)") { try bridge.createNode(id: id, type: "Container") }
         return id
     }
 
@@ -279,9 +283,18 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setRootWidget(_ widget: Widget) {
-        try? bridge.setRootNode(id: widget)
+        log("setRootWidget: \(widget)")
+        bridgeCall("setRootNode \(widget)") { try bridge.setRootNode(id: widget) }
     }
 
+    private func bridgeCall(_ label: String, _ call: () throws -> Void) {
+        do {
+            try call()
+        } catch {
+            log("bridge error [\(label)]: \(error)")
+        }
+    }
+  
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
         var current = children[container, default: []]
         current.insert(child, at: min(index, current.count))
@@ -411,33 +424,43 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     /// When there are pending events it spins without yielding for low latency.
     private func startEventLoop() {
         eventLoopTask = Task.detached(priority: .userInitiated) { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
+            do {
+                while !Task.isCancelled {
+                    guard let self else { return }
 
-                var dispatched = 0
+                    var dispatched = 0
 
-                // Drain up to 64 events per iteration to bound latency
-                for _ in 0..<64 {
-                    let json = try? await MainActor.run {
-                        try self.bridge.pollEvent()
+                    for _ in 0..<64 {
+                        let json: String?
+                        do {
+                            json = try await MainActor.run { try self.bridge.pollEvent() }
+                        } catch {
+                            log("pollEvent error: \(error)")
+                            break
+                        }
+
+                        guard let json, !json.isEmpty else { break }
+                        log(json)
+
+                        guard let event = IncomingEvent(json) else { continue }
+                        await self.dispatch(event)
+                        dispatched += 1
                     }
-                    guard let json, !json.isEmpty else { break }
-                  
-                    guard let event = IncomingEvent(json) else { continue }
-                    await self.dispatch(event)
-                    dispatched += 1
-                }
 
-                // If we got nothing, yield for ~4 ms before polling again
-                if dispatched == 0 {
-                    try? await Task.sleep(nanoseconds: 4_000_000)
+                    if dispatched == 0 {
+                        try await Task.sleep(nanoseconds: 4_000_000)
+                    }
                 }
+            } catch {
+                // CancellationError from Task.sleep — just exit cleanly
             }
         }
     }
 
     @MainActor
     private func dispatch(_ event: IncomingEvent) {
+        log("\(event)")
+      
         guard let h = handlers[event.id] else { return }
         switch event.type {
         case "click":
