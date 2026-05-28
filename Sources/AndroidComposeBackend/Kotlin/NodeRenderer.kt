@@ -8,12 +8,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
 
 /**
  * Recursively renders a WidgetNode tree.
  *
  * Because [nodes] is a SnapshotStateMap, Compose tracks which nodes each
- * call site reads. When Swift mutates a node via [ComposeBackendHost], only
+ * call site reads. When Swift mutates a node via [AndroidComposeBackendHost], only
  * the composables that read that specific node recompose — not the whole tree.
  */
 @Composable
@@ -57,7 +58,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             val enabled = node.prop(PropKey.ENABLED) != "false"
             Button(
                 enabled = enabled,
-                onClick = { ComposeBackendHost.pushEvent(node.id, "click") },
+                onClick = { AndroidComposeBackendHost.pushEvent(node.id, "click") },
             ) {
                 Text(label)
             }
@@ -79,7 +80,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
                 value = draft,
                 onValueChange = { new ->
                     draft = new
-                    ComposeBackendHost.pushEvent(node.id, "change", new)
+                    AndroidComposeBackendHost.pushEvent(node.id, "change", new)
                 },
                 label = {
                     node.prop(PropKey.PLACEHOLDER)?.let { Text(it) }
@@ -107,7 +108,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
                     checked = checked,
                     onCheckedChange = { new ->
                         checked = new
-                        ComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
+                        AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
                     },
                     enabled = node.prop(PropKey.ENABLED) != "false",
                 )
@@ -126,10 +127,10 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
                 valueRange = min..max,
                 onValueChange = { new ->
                     value = new
-                    ComposeBackendHost.pushEvent(node.id, "slide", new.toString())
+                    AndroidComposeBackendHost.pushEvent(node.id, "slide", new.toString())
                 },
                 onValueChangeFinished = {
-                    ComposeBackendHost.pushEvent(node.id, "slideEnd", value.toString())
+                    AndroidComposeBackendHost.pushEvent(node.id, "slideEnd", value.toString())
                 },
             )
         }

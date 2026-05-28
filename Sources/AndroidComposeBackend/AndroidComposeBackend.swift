@@ -49,7 +49,7 @@ func log(_ message: String) {
 /// Once initial setup and rendering is done, this function returns control
 /// back to the JVM (by returning).
 @MainActor
-@_cdecl("AndroidComposeBackend_entrypoint")
+@_cdecl("AndroidBackend_entrypoint")
 public func entrypoint(_ env: UnsafeMutablePointer<JNIEnv?>, _ object: jobject) {
     AndroidComposeBackend.env = env
 
