@@ -55,7 +55,7 @@ public func entrypoint(_ env: UnsafeMutablePointer<JNIEnv?>, _ object: jobject) 
 
     let holder = JavaObjectHolder(object: object, environment: env)
     AndroidComposeBackend.javaHolder = holder
-    // AndroidComposeBackend.activity = Activity(javaHolder: holder)
+    AndroidComposeBackend.activity = Activity(javaHolder: holder)
 
     // Source: https://phatbl.at/2019/01/08/intercepting-stdout-in-swift.html
     func makeMessageHandler(priority: UInt32) -> @Sendable (FileHandle) -> Void {
@@ -128,10 +128,19 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
 
     // Event handler registry — keyed by widget ID
     private var handlers: [Int32: EventHandlers] = [:]
+    
+    // Children widgets.
+    private var children: [Int32: [Int32]] = [:]
 
     // The Task running the event polling loop
     private var eventLoopTask: Task<Void, Never>?
 
+    public let defaultPaddingAmount = 10
+    public let scrollBarWidth = 0
+    public let requiresImageUpdateOnScaleFactorChange = false
+    public let supportsMultipleWindows = false
+    public let canOverrideWindowColorScheme = false
+  
     /// A reference used to keep the tickler alive.
     var tickler: MainRunLoopTickler?
   
@@ -140,7 +149,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     /// The underlying java object. Set by ``entrypoint``.
     static var javaHolder: JavaObjectHolder!
     /// The main activity. Set by ``entrypoint``.
-    // static var activity: Activity!
+    static var activity: Activity!
   
     public init() {
         self.bridge = AndroidComposeBackendBridge(javaHolder: Self.javaHolder)
@@ -164,6 +173,95 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
       
         callback()
     }
+  
+    public func computeRootEnvironment(defaultEnvironment: EnvironmentValues) -> EnvironmentValues {
+        var environment = defaultEnvironment
+      
+        // TODO(furbytm): Properly detect color scheme, instead of
+        // hardcoding this value.
+
+        environment.colorScheme = .dark
+
+        environment.isCircularScreen = Self.activity
+            .getResources()
+            .getConfiguration()
+            .isScreenRound()
+
+        // TODO(bbrk24): Properly detect time zone and calendar, since
+        // `.current` is broken on Android.
+
+        return environment
+    }
+  
+    public func createWindow(withDefaultSize defaultSize: SIMD2<Int>?) -> Window {
+        // TODO(stackotter): Properly support multiple calls to createWindow
+        return Window()
+    }
+  
+    public func setTitle(ofWindow window: Window, to title: String) {
+        // TODO(stackotter): Handle navigation titles.
+    }
+  
+    public func setResizeHandler(
+        ofWindow window: Window,
+        to action: @escaping (_ newSize: SIMD2<Int>) -> Void
+    ) {
+        // TODO(stackotter): Handle orientation changes and other changes such
+        // as density changes.
+    }
+  
+    public func setWindowEnvironmentChangeHandler(
+        of window: Window,
+        to action: @escaping @Sendable @MainActor () -> Void
+    ) {
+        // TODO(stackotter): React to per-window environment changes. See
+        // computeWindowEnvironment.
+    }
+  
+    public func computeWindowEnvironment(
+        window: Window,
+        rootEnvironment: EnvironmentValues
+    ) -> EnvironmentValues {
+        let environment = rootEnvironment
+        // environment.windowScaleFactor = Double(window.content!.getResources().getDisplayMetrics().density)
+        return environment
+    }
+  
+    public func setRootEnvironmentChangeHandler(
+        to action: @escaping @Sendable @MainActor () -> Void
+    ) {
+        // TODO(stackotter): Listen for system theme changes
+        // and call helpers.clearTextSizeCache()
+    }
+  
+    public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
+        false
+    }
+  
+    public func size(ofWindow window: Window) -> SIMD2<Int> {
+        let width = 100
+        let height = 100
+        return SIMD2(Int(width), Int(height))
+    }
+  
+    public func updateWindow(_ window: Window, environment: EnvironmentValues) {
+        // TODO(stackotter): Update window theme?
+        // updateInsets(ofWindow: window)
+    }
+
+    public func show(window: Window) {
+        log("Show window")
+    }
+  
+    public func show(widget: Widget) {}
+  
+    public func setChild(ofWindow window: Window, to child: Widget) {
+        let container = createContainer()
+        insert(child, into: container, at: 0)
+        // Self.activity.setContentView(container)
+        window.content = container
+        // updateInsets(ofWindow: window)
+    }
 
     public func createContainer() -> Widget {
         let id = allocateId()
@@ -176,6 +274,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setChildren(_ children: [Widget], ofContainer container: Widget) {
+        self.children[container] = children
         try? bridge.setChildren(parentId: container, childIds: children)
     }
 
@@ -183,6 +282,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         try? bridge.setRootNode(id: widget)
     }
 
+    public func insert(_ child: Widget, into container: Widget, at index: Int) {
+        var current = children[container, default: []]
+        current.insert(child, at: min(index, current.count))
+        children[container] = current
+        try? bridge.setChildren(parentId: container, childIds: current)
+    }
+  
+    public func createTextView() -> Widget {
+        createTextView(content: "", shouldWrap: false)
+    }
+  
     public func createTextView(content: String, shouldWrap: Bool) -> Widget {
         let id = allocateId()
         try? bridge.createNode(id: id, type: "Text")
@@ -190,6 +300,14 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         return id
     }
 
+    public func updateTextView(
+        _ textView: Widget,
+        content: String,
+        environment: EnvironmentValues
+    ) {
+        updateTextView(textView, content: content, shouldWrap: false)
+    }
+  
     public func updateTextView(_ widget: Widget, content: String, shouldWrap: Bool) {
         try? bridge.setProperty(id: widget, key: "text", value: content)
     }
@@ -282,6 +400,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
 
     public func destroyWidget(_ widget: Widget) {
         handlers.removeValue(forKey: widget)
+        children.removeValue(forKey: widget)
         try? bridge.removeNode(id: widget)
     }
 
@@ -332,5 +451,59 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         default:
             break
         }
+    }
+  
+    public func setSizeLimits(
+        ofWindow window: Window,
+        minimum: SIMD2<Int>,
+        maximum: SIMD2<Int>?
+    ) {
+        // Doesn't mean anything on Android until we support split screen
+    }
+  
+    public func setSizeLimits(
+        ofWindow window: Void,
+        minimum minimumSize: SIMD2<Int>,
+        maximum maximumSize: SIMD2<Int>?
+    ) {}
+  
+    public func setSize(of widget: Widget, to size: SIMD2<Int>) {
+        // guard let layoutParams = widget.getLayoutParams() else { return }
+        // let density = widget.getResources().getDisplayMetrics().density
+        // layoutParams.width = Int32(Float(size.x) * density)
+        // layoutParams.height = Int32(Float(size.y) * density)
+        // widget.setLayoutParams(layoutParams)
+    }
+  
+    public func size(
+        of text: String,
+        whenDisplayedIn widget: Widget,
+        proposedWidth: Int?,
+        proposedHeight: Int?,
+        environment: EnvironmentValues
+    ) -> SIMD2<Int> {
+        let widget = createTextView()
+        updateTextView(widget, content: text, environment: environment)
+
+        // 0x80000000 = View.MeasureSpec.AT_MOST
+        // 0x3FFFFFFF = View.MeasureSpec.makeMeasureSpec(Int32.max, View.MeasureSpec.UNSPECIFIED)
+        let widthSpec =
+            if let proposedWidth {
+                Int32(bitPattern: 0x80000000 |
+                    UInt32(Double(proposedWidth) * environment.windowScaleFactor) & ~0x40000000)
+            } else {
+                0x3FFFFFFF as Int32
+            }
+        let heightSpec =
+            if let proposedHeight {
+                Int32(Double(proposedHeight) * environment.windowScaleFactor)
+            } else {
+                0x3FFFFFFF as Int32
+            }
+
+        // widget.measure(widthSpec, heightSpec)
+        let width = Double(widthSpec) / environment.windowScaleFactor
+        let height = Double(heightSpec) / environment.windowScaleFactor
+        return SIMD2(Int(width.rounded(.up)), Int(height.rounded(.up)))
     }
 }
