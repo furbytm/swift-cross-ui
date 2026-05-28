@@ -165,9 +165,12 @@ private fun AndroidComposeBackendRoot() {
             }
             
             if (resolvedRootId != -1) {
-                // Text("swift render debug: rootId=$resolvedRootId nodes=${nodes.size}")
-                // nodes.forEach { (id, node) ->
-                //    Text("RenderNode: id=$id found=${node.type}")
+                // FOR DEBUGGING SWIFT UI RENDERING:
+                // Column {
+                //     Text("swift render debug: rootId=$resolvedRootId nodes=${nodes.size}")
+                //     nodes.forEach { (id, node) ->
+                //         Text("RenderNode: id=$id found=${node.type}")
+                //     }
                 // }
                 RenderNode(nodeId = resolvedRootId, nodes = nodes)
             }
