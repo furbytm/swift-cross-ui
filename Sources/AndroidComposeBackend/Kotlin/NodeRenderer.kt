@@ -27,10 +27,9 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
     when (node.type) {
 
         WidgetType.CONTAINER -> {
-            Box {
+            Box(modifier = Modifier.fillMaxSize()) {
                 node.children.forEachIndexed { index, childId ->
                     val (x, y) = node.childPositions[index] ?: (0 to 0)
-                    Log.d("render", "RenderNode: id=$nodeId found=${node.type} properties=${node.properties} position=(${x.dp},${y.dp})")
                     Box(modifier = Modifier.offset(x.dp, y.dp)) {
                         RenderNode(childId, nodes)
                     }

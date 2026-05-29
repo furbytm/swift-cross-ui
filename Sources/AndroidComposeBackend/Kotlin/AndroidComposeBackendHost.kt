@@ -176,4 +176,37 @@ object AndroidComposeBackendHost {
         val heightDp = (layout.height / density).toInt()
         return "$naturalWidthDp,$heightDp"
     }
+    
+    @JvmStatic
+    fun measureWidget(id: Int): String {
+        val ctx = applicationContext ?: return "0,0"
+        val density = ctx.resources.displayMetrics.density
+        val node = nodes[id] ?: return "0,0"
+        
+        val (widthPx, heightPx) = when (node.type) {
+            WidgetType.BUTTON -> {
+                val paint = android.text.TextPaint().apply {
+                    textSize = 14f * ctx.resources.displayMetrics.scaledDensity
+                }
+                val label = node.properties[PropKey.LABEL] ?: ""
+                val textWidth = paint.measureText(label)
+                // Material3 button: horizontal padding 24dp each side, height 40dp
+                Pair((textWidth + 48 * density).toInt(), (40 * density).toInt())
+            }
+            WidgetType.TEXT_FIELD -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.TOGGLE    -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.SLIDER    -> Pair((280 * density).toInt(), (40 * density).toInt())
+            WidgetType.DIVIDER   -> Pair((280 * density).toInt(), (1  * density).toInt())
+            else -> Pair(0, 0)
+        }
+        
+        val widthDp  = (widthPx  / density).toInt()
+        val heightDp = (heightPx / density).toInt()
+        return "$widthDp,$heightDp"
+    }
+    
+    @JvmStatic
+    fun getTextFieldValue(id: Int): String {
+        return nodes[id]?.properties[PropKey.VALUE] ?: ""
+    }
 }

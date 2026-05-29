@@ -55,6 +55,12 @@ struct AndroidComposeBackendHostClass: AnyJavaObject {
   
     @JavaMethod
     func measureText(_ text: String, _ fontSizeSp: Float, _ maxWidthDp: Int32) throws -> JavaString?
+  
+    @JavaMethod
+    func measureWidget(_ id: Int32) throws -> JavaString?
+
+    @JavaMethod
+    func getTextFieldValue(_ id: Int32) throws -> JavaString?
 }
 
 /// Thin Swift facade that converts Swift String/Int/Bool to Java types and
@@ -111,5 +117,17 @@ public final class AndroidComposeBackendBridge {
               let str = Optional(jStr.toString()) else { return [] }
         let parts = str.split(separator: ",").compactMap { Int($0) }
         return parts
+    }
+  
+    public func measureWidget(id: Int32) throws -> [Int] {
+        guard let jStr = try hostClass.measureWidget(id),
+              let str = Optional(jStr.toString()) else { return [] }
+        let parts = str.split(separator: ",").compactMap { Int($0) }
+        return parts
+    }
+  
+    public func getTextFieldValue(id: Int32) throws -> String {
+        guard let jStr = try hostClass.getTextFieldValue(id) else { return "" }
+        return jStr.toString()
     }
 }

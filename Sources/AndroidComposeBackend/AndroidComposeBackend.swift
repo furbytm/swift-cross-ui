@@ -174,6 +174,12 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         callback()
     }
   
+    public func runInMainThread(action: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            action()
+        }
+    }
+  
     public func computeRootEnvironment(defaultEnvironment: EnvironmentValues) -> EnvironmentValues {
         var environment = defaultEnvironment
       
@@ -266,6 +272,13 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
   
     public func setChild(ofWindow window: Window, to child: Widget) {
         log("setChild called with child=\(child)")
+        if let existing = window.content {
+            // Clear the old root before setting new one
+            try? bridge.clearAll()
+            children.removeAll()
+            handlers.removeAll()
+            nextId = 1
+        }
         let container = createContainer()
         log("created container=\(container)")
         insert(child, into: container, at: 0)
@@ -307,8 +320,25 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         }
     }
   
-    public func insert(_ child: Widget, into container: Widget, at index: Int) {
+    public func remove(childAt index: Int, from container: Widget) {
+        log("remove: childAt=\(index) from=\(container)")
         var current = children[container, default: []]
+        guard index < current.count else { return }
+        current.remove(at: index)
+        children[container] = current
+        try? bridge.setChildren(parentId: container, childIds: current)
+    }
+  
+    public func insert(_ child: Widget, into container: Widget, at index: Int) {
+        // Remove child from any existing container first
+        for (existingContainer, existingChildren) in children {
+            if existingContainer != container && existingChildren.contains(child) {
+                remove(childAt: existingChildren.firstIndex(of: child)!, from: existingContainer)
+            }
+        }
+        
+        var current = children[container, default: []]
+        current.removeAll { $0 == child }
         current.insert(child, at: min(index, current.count))
         children[container] = current
         try? bridge.setChildren(parentId: container, childIds: current)
@@ -324,6 +354,10 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         try? bridge.setProperty(id: id, key: "text", value: content)
         return id
     }
+  
+    public func setContent(ofTextField textField: Widget, to content: String) {
+        try? bridge.setProperty(id: textField, key: "value", value: content)
+    }
 
     public func updateTextView(
         _ textView: Widget,
@@ -337,6 +371,12 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         try? bridge.setProperty(id: widget, key: "text", value: content)
     }
 
+    public func createButton() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "Button")
+        return id
+    }
+  
     public func createButton(label: String, action: @escaping () -> Void) -> Widget {
         let id = allocateId()
         try? bridge.createNode(id: id, type: "Button")
@@ -350,6 +390,22 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         handlers[widget, default: EventHandlers()].onClick = action
     }
 
+    public func updateButton(
+        _ widget: Widget,
+        label: String,
+        environment: EnvironmentValues,
+        action: @escaping () -> Void
+    ) {
+        try? bridge.setProperty(id: widget, key: "label", value: label)
+        handlers[widget, default: EventHandlers()].onClick = action
+    }
+  
+    public func createTextField() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "TextField")
+        return id
+    }
+  
     public func createTextField(
         placeholder: String,
         value: String,
@@ -364,6 +420,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func updateTextField(
+        _ textField: Widget,
+        placeholder: String,
+        environment: EnvironmentValues,
+        onChange: @escaping (String) -> Void,
+        onSubmit: @escaping () -> Void
+    ) {
+        try? bridge.setProperty(id: textField, key: "placeholder", value: placeholder)
+        handlers[textField, default: EventHandlers()].onChange = onChange
+    }
+  
+    public func updateTextField(
         _ widget: Widget,
         placeholder: String,
         value: String,
@@ -373,7 +440,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         try? bridge.setProperty(id: widget, key: "value", value: value)
         handlers[widget, default: EventHandlers()].onChange = onChange
     }
+  
+    public func getContent(ofTextField textField: Widget) -> String {
+        return (try? bridge.getTextFieldValue(id: textField)) ?? ""
+    }
 
+    public func createToggle() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "Toggle")
+        return id
+    }
+  
     public func createToggle(
         label: String,
         value: Bool,
@@ -387,9 +464,29 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         return id
     }
 
+    public func updateToggle(
+        _ widget: Widget,
+        label: String,
+        environment: EnvironmentValues,
+        onChange: @escaping (Bool) -> Void
+    ) {
+        try? bridge.setProperty(id: widget, key: "label", value: label)
+        handlers[widget, default: EventHandlers()].onToggle = onChange
+    }
+  
     public func updateToggle(_ widget: Widget, label: String, value: Bool) {
         try? bridge.setProperty(id: widget, key: "label", value: label)
         try? bridge.setProperty(id: widget, key: "value", value: value ? "true" : "false")
+    }
+  
+    public func setState(ofToggle toggle: Widget, to state: Bool) {
+        try? bridge.setProperty(id: toggle, key: "value", value: state ? "true" : "false")
+    }
+  
+    public func createSlider() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "Slider")
+        return id
     }
 
     public func createSlider(
@@ -407,6 +504,23 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         return id
     }
 
+    public func updateSlider(
+        _ widget: Widget,
+        minimum: Double,
+        maximum: Double,
+        decimalPlaces: Int,
+        environment: EnvironmentValues,
+        onChange: @escaping (Double) -> Void
+    ) {
+        try? bridge.setProperty(id: widget, key: "min", value: "\(minimum)")
+        try? bridge.setProperty(id: widget, key: "max", value: "\(maximum)")
+        handlers[widget, default: EventHandlers()].onSlide = onChange
+    }
+  
+    public func setValue(ofSlider slider: Widget, to value: Double) {
+        try? bridge.setProperty(id: slider, key: "value", value: "\(value)")
+    }
+  
     public func createSpacer(flexing: Bool, size: Int?) -> Widget {
         let id = allocateId()
         try? bridge.createNode(id: id, type: "Spacer")
@@ -501,6 +615,19 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         minimum minimumSize: SIMD2<Int>,
         maximum maximumSize: SIMD2<Int>?
     ) {}
+  
+    public func naturalSize(of widget: Widget) -> SIMD2<Int> {
+        guard let result = try? bridge.measureWidget(id: widget),
+              result.count >= 2 else {
+            return SIMD2(0, 0)
+        }
+        return SIMD2(Int(result[0]), Int(result[1]))
+    }
+  
+    public func removeAllChildren(of container: Widget) {
+        children[container] = []
+        try? bridge.setChildren(parentId: container, childIds: [])
+    }
   
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
         // guard let layoutParams = widget.getLayoutParams() else { return }

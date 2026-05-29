@@ -119,6 +119,7 @@ class AndroidComposeBackendActivity : com.example.helloworld.MainActivity() {
     fun removeNode(id: Int) = AndroidComposeBackendHost.removeNode(id)
     fun clearAll() = AndroidComposeBackendHost.clearAll()
     fun measureText(text: String, fontSizeSp: Float, maxWidthDp: Int): String = AndroidComposeBackendHost.measureText(text, fontSizeSp, maxWidthDp)
+    fun getTextFieldValue(id: Int): String = AndroidComposeBackendHost.getTextFieldValue(id)
 }
 
 /**
