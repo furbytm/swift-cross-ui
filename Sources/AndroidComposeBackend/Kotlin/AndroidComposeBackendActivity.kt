@@ -69,6 +69,7 @@ val AppTabs = listOf(
 class AndroidComposeBackendActivity : com.example.helloworld.MainActivity() {
   
     override fun onCreate(savedInstanceState: Bundle?) {
+        AndroidComposeBackendHost.initialize(this)
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -117,6 +118,7 @@ class AndroidComposeBackendActivity : com.example.helloworld.MainActivity() {
     fun setRootNode(id: Int) = AndroidComposeBackendHost.setRootNode(id)
     fun removeNode(id: Int) = AndroidComposeBackendHost.removeNode(id)
     fun clearAll() = AndroidComposeBackendHost.clearAll()
+    fun measureText(text: String, fontSizeSp: Float, maxWidthDp: Int): String = AndroidComposeBackendHost.measureText(text, fontSizeSp, maxWidthDp)
 }
 
 /**

@@ -52,6 +52,9 @@ struct AndroidComposeBackendHostClass: AnyJavaObject {
 
     @JavaMethod
     func pendingEventCount() throws -> Int32
+  
+    @JavaMethod
+    func measureText(_ text: String, _ fontSizeSp: Float, _ maxWidthDp: Int32) throws -> JavaString?
 }
 
 /// Thin Swift facade that converts Swift String/Int/Bool to Java types and
@@ -101,5 +104,12 @@ public final class AndroidComposeBackendBridge {
 
     public func pendingEventCount() throws -> Int {
         return Int(try hostClass.pendingEventCount())
+    }
+  
+    public func measureText(text: String, fontSizeSp: Float, maxWidthDp: Int32) throws -> [Int] {
+        guard let jStr = try hostClass.measureText(text, fontSizeSp, maxWidthDp),
+              let str = Optional(jStr.toString()) else { return [] }
+        let parts = str.split(separator: ",").compactMap { Int($0) }
+        return parts
     }
 }

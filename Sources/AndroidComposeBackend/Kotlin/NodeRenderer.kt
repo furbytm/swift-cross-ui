@@ -20,28 +20,26 @@ import androidx.compose.ui.Alignment
  */
 @Composable
 fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
-    val node = nodes[nodeId]!!
+    val node = nodes[nodeId] ?: return
     
     Log.d("render", "RenderNode: id=$nodeId found=${node.type} properties=${node.properties}")
 
     when (node.type) {
 
-        "Container" -> {
+        WidgetType.CONTAINER -> {
             Box {
                 node.children.forEachIndexed { index, childId ->
                     val (x, y) = node.childPositions[index] ?: (0 to 0)
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Log.d("render", "RenderNode: id=$nodeId found=${node.type} properties=${node.properties} position=(${x.dp},${y.dp})")
+                    Box(modifier = Modifier.offset(x.dp, y.dp)) {
                         RenderNode(childId, nodes)
                     }
                 }
             }
         }
 
-        "Text" -> {
-            val text = node.prop("text") ?: ""
+        WidgetType.TEXT -> {
+            val text = node.prop(PropKey.TEXT) ?: ""
             val fontSize = node.prop(PropKey.FONT_SIZE)?.toIntOrNull()
             val fontWeight = when (node.prop(PropKey.FONT_WEIGHT)) {
                 "bold"   -> FontWeight.Bold
@@ -59,7 +57,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             )
         }
 
-        "Button" -> {
+        WidgetType.BUTTON -> {
             val label = node.prop(PropKey.LABEL) ?: ""
             val enabled = node.prop(PropKey.ENABLED) != "false"
             Button(
@@ -70,7 +68,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
         }
 
-        "TextField" -> {
+        WidgetType.TEXT_FIELD -> {
             // Local draft state so the field feels responsive while Swift processes
             // the change event asynchronously.
             var draft by remember(nodeId) {
@@ -95,7 +93,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             )
         }
 
-        "Toggle" -> {
+        WidgetType.TOGGLE -> {
             var checked by remember(nodeId) {
                 mutableStateOf(node.prop(PropKey.VALUE) == "true")
             }
@@ -121,7 +119,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
         }
 
-        "Slider" -> {
+        WidgetType.SLIDER -> {
             var value by remember(nodeId) {
                 mutableStateOf(node.prop(PropKey.VALUE)?.toFloatOrNull() ?: 0f)
             }

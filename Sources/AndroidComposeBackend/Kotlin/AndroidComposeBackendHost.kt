@@ -24,6 +24,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * and Swift drains it from its own polling loop.
  */
 object AndroidComposeBackendHost {
+  
+    var applicationContext: android.content.Context? = null
 
     val nodes: SnapshotStateMap<Int, WidgetNode> = mutableStateMapOf()
 
@@ -35,6 +37,11 @@ object AndroidComposeBackendHost {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    @JvmStatic
+    fun initialize(context: android.content.Context) {
+        applicationContext = context.applicationContext
+    }
+    
     /**
      * Create a new node with the given type. Must be followed by property/child
      * calls before [setRootNode] makes it visible.
@@ -149,5 +156,24 @@ object AndroidComposeBackendHost {
         } else {
             mainHandler.post { block() }
         }
+    }
+    
+    @JvmStatic
+    fun measureText(text: String, fontSizeSp: Float, maxWidthDp: Int): String {
+        val ctx = applicationContext ?: return "100,20"
+        val density = ctx.resources.displayMetrics.density
+        @Suppress("DEPRECATION")
+        val scaledDensity = ctx.resources.displayMetrics.scaledDensity
+        val paint = android.text.TextPaint().apply {
+            textSize = fontSizeSp * scaledDensity
+        }
+        val maxWidthPx = if (maxWidthDp > 0) (maxWidthDp * density).toInt() else Int.MAX_VALUE
+        val layout = android.text.StaticLayout.Builder
+            .obtain(text, 0, text.length, paint, maxWidthPx)
+            .build()
+        // Use actual line width, not the layout constraint width
+        val naturalWidthDp = (layout.getLineWidth(0) / density).toInt() + 1
+        val heightDp = (layout.height / density).toInt()
+        return "$naturalWidthDp,$heightDp"
     }
 }

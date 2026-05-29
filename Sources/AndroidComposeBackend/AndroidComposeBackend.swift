@@ -111,6 +111,10 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
 
     static let stdoutPipe = Pipe()
     static let stderrPipe = Pipe()
+    
+    /// Used to determine adaptive sizing behaviour such as
+    /// the sizes of the various dynamic ``Font/TextStyle``s.
+    public lazy var deviceClass: DeviceClass = .phone
   
     // Shared bridge to the Kotlin host
     private let bridge: AndroidComposeBackendBridge
@@ -238,12 +242,15 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
   
     public func size(ofWindow window: Window) -> SIMD2<Int> {
         guard let metrics = Self.activity.getResources().getDisplayMetrics() else {
-            return SIMD2(360, 800) // sensible dp fallback
+            return SIMD2(360, 800)
         }
-        let density  = Double(metrics.density)
-        let widthDp  = Int((Double(metrics.widthPixels)  / density).rounded(.down))
+        let density = Double(metrics.density)
+        let widthDp = Int((Double(metrics.widthPixels) / density).rounded(.down))
         let heightDp = Int((Double(metrics.heightPixels) / density).rounded(.down))
-        return SIMD2(widthDp, heightDp)
+        // Subtract status bar (156px) and nav bar (72px) converted to dp
+        let statusBarDp = Int((156.0 / density).rounded(.down))
+        let navBarDp = Int((72.0 / density).rounded(.down))
+        return SIMD2(widthDp, heightDp - statusBarDp - navBarDp)
     }
   
     public func updateWindow(_ window: Window, environment: EnvironmentValues) {
@@ -274,6 +281,11 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
+        guard position.x >= 0, position.x < 100_000,
+              position.y >= 0, position.y < 100_000 else {
+            log("setPosition: skipping bogus position for container=\(container) pos=\(position)")
+            return
+        }
         try? bridge.setPosition(containerId: container, index: Int32(index), x: Int32(position.x), y: Int32(position.y))
     }
 
@@ -505,28 +517,16 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         proposedHeight: Int?,
         environment: EnvironmentValues
     ) -> SIMD2<Int> {
-        let widget = createTextView()
-        updateTextView(widget, content: text, environment: environment)
-
-        // 0x80000000 = View.MeasureSpec.AT_MOST
-        // 0x3FFFFFFF = View.MeasureSpec.makeMeasureSpec(Int32.max, View.MeasureSpec.UNSPECIFIED)
-        let widthSpec =
-            if let proposedWidth {
-                Int32(bitPattern: 0x80000000 |
-                    UInt32(Double(proposedWidth) * environment.windowScaleFactor) & ~0x40000000)
-            } else {
-                0x3FFFFFFF as Int32
-            }
-        let heightSpec =
-            if let proposedHeight {
-                Int32(Double(proposedHeight) * environment.windowScaleFactor)
-            } else {
-                0x3FFFFFFF as Int32
-            }
-
-        // widget.measure(widthSpec, heightSpec)
-        let width = Double(widthSpec) / environment.windowScaleFactor
-        let height = Double(heightSpec) / environment.windowScaleFactor
-        return SIMD2(Int(width.rounded(.up)), Int(height.rounded(.up)))
+        let fontSize = Float(environment.resolvedFont.pointSize)
+        let maxWidth = proposedWidth ?? 0
+        if let result = try? bridge.measureText(text: text, fontSizeSp: fontSize, maxWidthDp: Int32(maxWidth)),
+           result.count >= 2,
+           result[0] > 20, result[1] > 4 {
+            log("measureText: '\(text)' fontSize=\(fontSize) -> \(result[0])x\(result[1])")
+            return SIMD2(Int(result[0]), Int(result[1]))
+        }
+        // fallback
+        let charWidth = Int(Double(fontSize) * 0.6) + 1
+        return SIMD2(text.count * charWidth, Int(fontSize) + 4)
     }
 }
