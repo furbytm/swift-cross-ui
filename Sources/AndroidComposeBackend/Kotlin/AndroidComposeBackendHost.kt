@@ -1,6 +1,7 @@
 package dev.swiftcrossui.compose
 
 import android.util.Log
+import android.util.TypedValue
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.mutableStateOf
@@ -29,13 +30,13 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * and Swift drains it from its own polling loop.
  */
 object AndroidComposeBackendHost {
-  
+
     var applicationContext: android.content.Context? = null
-    
+
     var windowInsets: WindowInsetsCompat? = null
-    
+
     var treeReady by mutableStateOf(false)
-    
+
     val nodeParent: SnapshotStateMap<Int, Int> = mutableStateMapOf()
 
     val nodes: SnapshotStateMap<Int, WidgetNode> = mutableStateMapOf()
@@ -52,7 +53,7 @@ object AndroidComposeBackendHost {
     fun initialize(context: android.content.Context) {
         applicationContext = context.applicationContext
     }
-    
+
     /**
      * Create a new node with the given type. Must be followed by property/child
      * calls before [setRootNode] makes it visible.
@@ -70,12 +71,6 @@ object AndroidComposeBackendHost {
     fun setProperty(id: Int, key: String, value: String) {
         onMain {
             val existing = nodes[id] ?: return@onMain
-            // Don't let a tiny/degenerate size overwrite a meaningful one
-            if (key == "height") {
-                val newH = value.toIntOrNull() ?: 0
-                val oldH = existing.properties["height"]?.toIntOrNull() ?: 0
-                if (newH < oldH) return@onMain
-            }
             nodes[id] = existing.copy(
                 properties = existing.properties + (key to value)
             )
@@ -90,9 +85,12 @@ object AndroidComposeBackendHost {
     fun setChildren(parentId: Int, childIds: IntArray) {
         onMain {
             val existing = nodes[parentId] ?: return@onMain
+            val newSize = childIds.size
+            // Preserve positions for valid indices; setPosition will update them
+            val retained = existing.childPositions.filter { (idx, _) -> idx < newSize }
             nodes[parentId] = existing.copy(
                 children = childIds.toList(),
-                childPositions = emptyMap()
+                childPositions = retained
             )
         }
     }
@@ -192,7 +190,7 @@ object AndroidComposeBackendHost {
             mainHandler.post { block() }
         }
     }
-    
+
     @JvmStatic
     fun measureText(text: String, fontSizeSp: Float, maxWidthDp: Int): String {
         val ctx = applicationContext ?: return "100,20"
@@ -206,18 +204,21 @@ object AndroidComposeBackendHost {
         val layout = android.text.StaticLayout.Builder
             .obtain(text, 0, text.length, paint, maxWidthPx)
             .build()
-        // Use actual line width, not the layout constraint width
-        val naturalWidthDp = (layout.getLineWidth(0) / density).toInt() + 1
+        val maxLineWidth = (0 until layout.lineCount).maxOfOrNull { layout.getLineWidth(it) } ?: 0f
+        val naturalWidthDp = (maxLineWidth / density).toInt() + 1
         val heightDp = (layout.height / density).toInt()
         return "$naturalWidthDp,$heightDp"
     }
-    
+
     @JvmStatic
     fun measureWidget(id: Int): String {
         val ctx = applicationContext ?: return "0,0"
         val density = ctx.resources.displayMetrics.density
+        val scaledDensity = ctx.resources.displayMetrics.scaledDensity
         val node = nodes[id] ?: return "0,0"
-        
+
+        fun dp(dp: Int) = (dp * density).toInt()
+
         val (widthPx, heightPx) = when (node.type) {
             WidgetType.TEXT -> {
                 val text = node.properties[PropKey.TEXT] ?: ""
@@ -228,7 +229,8 @@ object AndroidComposeBackendHost {
                 val layout = android.text.StaticLayout.Builder
                     .obtain(text, 0, text.length, paint, (280 * density).toInt())
                     .build()
-                Pair((layout.getLineWidth(0) / density).toInt() + 1, (layout.height / density).toInt())
+                val maxW = (0 until layout.lineCount).maxOfOrNull { layout.getLineWidth(it) } ?: 0f
+                Pair((maxW / density).toInt() + 1, (layout.height / density).toInt())
             }
             WidgetType.BUTTON -> {
                 val paint = android.text.TextPaint().apply {
@@ -270,12 +272,12 @@ object AndroidComposeBackendHost {
         val heightDp = (heightPx / density).toInt()
         return "$widthDp,$heightDp"
     }
-    
+
     @JvmStatic
     fun getTextFieldValue(id: Int): String {
         return nodes[id]?.properties[PropKey.VALUE] ?: ""
     }
-    
+
     @JvmStatic
     fun getWindowInsets(): String {
         val insets = windowInsets ?: return "0,0,0,0"

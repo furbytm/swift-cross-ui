@@ -138,6 +138,10 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     // The Task running the event polling loop
     private var eventLoopTask: Task<Void, Never>?
 
+    private var measuredSizes: [Int32: SIMD2<Int>] = [:]
+    private var environmentChangeHandler: (@Sendable @MainActor () -> Void)?
+    private var cachedWindowWidth: Int = 426
+  
     public let defaultPaddingAmount = 10
     public let scrollBarWidth = 0
     public let requiresImageUpdateOnScaleFactorChange = false
@@ -241,8 +245,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     public func setRootEnvironmentChangeHandler(
         to action: @escaping @Sendable @MainActor () -> Void
     ) {
-        // TODO(stackotter): Listen for system theme changes
-        // and call helpers.clearTextSizeCache()
+        self.environmentChangeHandler = action
     }
   
     public func isWindowProgrammaticallyResizable(_ window: Window) -> Bool {
@@ -257,7 +260,6 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         let widthDp = Int((Double(metrics.widthPixels) / density).rounded(.down))
         let heightDp = Int((Double(metrics.heightPixels) / density).rounded(.down))
         let insets = (try? bridge.getWindowInsets()) ?? (statusBar: 0, navBar: 0)
-        // Fall back to known values if insets not yet available
         let statusBarDp = insets.statusBar > 0
             ? Int((Double(insets.statusBar) / density).rounded(.down))
             : Int((156.0 / density).rounded(.down))
@@ -265,7 +267,9 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
             ? Int((Double(insets.navBar) / density).rounded(.down))
             : Int((72.0 / density).rounded(.down))
         log("size(ofWindow) density=\(density) w=\(widthDp) h=\(heightDp) statusBar=\(statusBarDp) navBar=\(navBarDp)")
-        return SIMD2(widthDp, heightDp - statusBarDp - navBarDp)
+        let result = SIMD2(widthDp, heightDp - statusBarDp - navBarDp)
+        cachedWindowWidth = result.x  // ← add this line
+        return result
     }
   
     public func updateWindow(_ window: Window, environment: EnvironmentValues) {
@@ -304,13 +308,16 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
-        log("setPosition: child[\(index)] in container=\(container) → \(position.x), \(position.y)")
-        guard position.x >= 0, position.x < 100_000,
-              position.y >= 0, position.y < 100_000 else {
+        guard position.x < 100_000, position.y < 100_000 else {
             log("setPosition: skipping bogus position for container=\(container) pos=\(position)")
             return
         }
-        try? bridge.setPosition(containerId: container, index: Int32(index), x: Int32(position.x), y: Int32(position.y))
+        let x = max(0, position.x)
+        let y = max(0, position.y)
+        if x > 0 {
+            log("setPosition: container=\(container) childAt=\(index) x=\(x) y=\(y)")
+        }
+        try? bridge.setPosition(containerId: container, index: Int32(index), x: Int32(x), y: Int32(y))
     }
 
     public func setChildren(_ children: [Widget], ofContainer container: Widget) {
@@ -650,6 +657,14 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     private func dispatch(_ event: IncomingEvent) {
         log("\(event)")
       
+        // if event.type == "measured" {
+        //     let parts = event.payload.split(separator: ",").compactMap { Int($0) }
+        //     if parts.count == 2 {
+        //         measuredSizes[event.id] = SIMD2(parts[0], parts[1])
+        //     }
+        //     return
+        // }
+      
         guard let h = handlers[event.id] else { return }
         switch event.type {
         case "click":
@@ -680,17 +695,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     ) {}
   
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
+        if let cached = measuredSizes[widget] {
+            return SIMD2(min(cached.x, cachedWindowWidth), cached.y)
+        }
         do {
             let result = try bridge.measureWidget(id: widget)
-            if result.count >= 2, result[0] > 0 || result[1] > 0 {
-                log("naturalSize(\(widget)) -> \(result[0])x\(result[1])")
-                return SIMD2(Int(result[0]), Int(result[1]))
+            if result.count >= 2, result[0] > 0 {
+                let size = SIMD2(Int(result[0]), Int(result[1]))
+                return SIMD2(min(size.x, cachedWindowWidth), size.y)
             }
-        } catch {
-            log("naturalSize(\(widget)) -> error: \(error)")
-        }
-        // For containers, return zero so SwiftCrossUI sizes them by their content
-        return SIMD2(0, 0)
+        } catch {}
+        return SIMD2(cachedWindowWidth, 0)
     }
   
     public func removeAllChildren(of container: Widget) {

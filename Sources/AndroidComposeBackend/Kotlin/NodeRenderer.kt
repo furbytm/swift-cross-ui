@@ -11,6 +11,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -32,26 +34,26 @@ import androidx.compose.foundation.text.KeyboardOptions
 @Composable
 fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
     val node = nodes[nodeId] ?: return
-    
-    Log.d("render", "RenderNode: id=$nodeId found=${node.type} properties=${node.properties}")
 
     when (node.type) {
 
         WidgetType.CONTAINER -> {
-            val widthDp = node.properties["width"]?.toIntOrNull()
             val heightDp = node.properties["height"]?.toIntOrNull()
-            val sizeModifier = if (widthDp != null && heightDp != null) {
-                Modifier.sizeIn(minWidth = widthDp.dp, minHeight = heightDp.dp)
+            // Width is never stored (setSize only writes height) so containers
+            // always fill the available parent width. Height is stored so the
+            // scroll container knows its total vertical extent.
+            val sizeModifier = if (heightDp != null) {
+                Modifier.fillMaxWidth().heightIn(min = heightDp.dp)
             } else {
                 Modifier.fillMaxSize()
             }
-          
+
             Box(modifier = sizeModifier) {
                 node.children.forEachIndexed { index, childId ->
                     val registeredParent = AndroidComposeBackendHost.nodeParent[childId]
                     if (registeredParent != null && registeredParent != nodeId) return@forEachIndexed
                     val (x, y) = node.childPositions[index] ?: (0 to 0)
-                    Box(modifier = Modifier.offset(x.dp, y.dp)) {
+                    Box(modifier = Modifier.absoluteOffset(x.dp, y.dp)) {
                         RenderNode(childId, nodes)
                     }
                 }
@@ -69,12 +71,14 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
             val color = node.prop(PropKey.FOREGROUND)?.let { parseColor(it) }
 
-            Text(
-                text = text,
-                fontSize = fontSize?.sp ?: LocalTextStyle.current.fontSize,
-                fontWeight = fontWeight,
-                color = color ?: Color.Unspecified,
-            )
+            Measured(node.id) {
+                Text(
+                    text = text,
+                    fontSize = fontSize?.sp ?: LocalTextStyle.current.fontSize,
+                    fontWeight = fontWeight,
+                    color = color ?: Color.Unspecified,
+                )
+            }
         }
 
         WidgetType.BUTTON -> {
@@ -86,58 +90,61 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
 
             if (!menuItems.isNullOrEmpty()) {
                 var expanded by remember(nodeId) { mutableStateOf(false) }
-                Box {
-                    Button(
-                        enabled = enabled,
-                        onClick = { expanded = true }
-                    ) { Text(label) }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
-                    ) {
-                        menuItems.forEachIndexed { index, item ->
-                            DropdownMenuItem(
-                                text = { Text(item) },
-                                onClick = {
-                                    expanded = false
-                                    AndroidComposeBackendHost.pushEvent(node.id, "menuSelect", index.toString())
-                                }
-                            )
+                Measured(node.id) {
+                    Box {
+                        Button(
+                            enabled = enabled,
+                            onClick = { expanded = true }
+                        ) { Text(label) }
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            menuItems.forEachIndexed { index, item ->
+                                DropdownMenuItem(
+                                    text = { Text(item) },
+                                    onClick = {
+                                        expanded = false
+                                        AndroidComposeBackendHost.pushEvent(node.id, "menuSelect", index.toString())
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             } else {
-                Button(
-                    enabled = enabled,
-                    onClick = { AndroidComposeBackendHost.pushEvent(node.id, "click") }
-                ) { Text(label) }
+                Measured(node.id) {
+                    Button(
+                        enabled = enabled,
+                        onClick = { AndroidComposeBackendHost.pushEvent(node.id, "click") }
+                    ) { Text(label) }
+                }
             }
         }
 
         WidgetType.TEXT_FIELD -> {
-            // Local draft state so the field feels responsive while Swift processes
-            // the change event asynchronously.
             var draft by remember(nodeId) {
                 mutableStateOf(node.prop(PropKey.VALUE) ?: "")
             }
-            // Keep in sync if Swift pushes an update externally (e.g. clear field)
             val canonical = node.prop(PropKey.VALUE) ?: ""
             LaunchedEffect(canonical) {
                 if (draft != canonical) draft = canonical
             }
 
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = draft,
-                onValueChange = { new ->
-                    draft = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "change", new)
-                },
-                label = {
-                    node.prop(PropKey.PLACEHOLDER)?.let { Text(it) }
-                },
-                enabled = node.prop(PropKey.ENABLED) != "false",
-            )
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = draft,
+                    onValueChange = { new ->
+                        draft = new
+                        AndroidComposeBackendHost.pushEvent(node.id, "change", new)
+                    },
+                    label = {
+                        node.prop(PropKey.PLACEHOLDER)?.let { Text(it) }
+                    },
+                    enabled = node.prop(PropKey.ENABLED) != "false",
+                )
+            }
         }
 
         WidgetType.TOGGLE -> {
@@ -149,20 +156,21 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
                 if (checked != canonical) checked = canonical
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.width(280.dp),
-            ) {
-                Text(node.prop(PropKey.LABEL) ?: "")
-                Switch(
-                    checked = checked,
-                    onCheckedChange = { new ->
-                        checked = new
-                        AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
-                    },
-                    enabled = node.prop(PropKey.ENABLED) != "false",
-                )
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(node.prop(PropKey.LABEL) ?: "")
+                    Switch(
+                        checked = checked,
+                        onCheckedChange = { new ->
+                            checked = new
+                            AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
+                        },
+                        enabled = node.prop(PropKey.ENABLED) != "false",
+                    )
+                }
             }
         }
 
@@ -173,37 +181,45 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             val min = node.prop(PropKey.MIN_VALUE)?.toFloatOrNull() ?: 0f
             val max = node.prop(PropKey.MAX_VALUE)?.toFloatOrNull() ?: 1f
 
-            Slider(
-                value = value,
-                valueRange = min..max,
-                onValueChange = { new ->
-                    value = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "slide", new.toString())
-                },
-                onValueChangeFinished = {
-                    AndroidComposeBackendHost.pushEvent(node.id, "slideEnd", value.toString())
-                },
-            )
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Slider(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = value,
+                    valueRange = min..max,
+                    onValueChange = { new ->
+                        value = new
+                        AndroidComposeBackendHost.pushEvent(node.id, "slide", new.toString())
+                    },
+                    onValueChangeFinished = {
+                        AndroidComposeBackendHost.pushEvent(node.id, "slideEnd", value.toString())
+                    },
+                )
+            }
         }
-        
+
         WidgetType.PICKER_RADIO_GROUP -> {
             val options = node.prop("options")?.split("\u001F") ?: emptyList()
             val selected = node.prop("selected")?.toIntOrNull() ?: -1
             val enabled = node.prop(PropKey.ENABLED) != "false"
-            Column {
-                options.forEachIndexed { index, label ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    ) {
-                        RadioButton(
-                            selected = index == selected,
-                            onClick = {
-                                AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
-                            },
-                            enabled = enabled
-                        )
-                        Text(label)
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    options.forEachIndexed { index, label ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            RadioButton(
+                                selected = index == selected,
+                                onClick = {
+                                    AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
+                                },
+                                enabled = enabled
+                            )
+                            Text(label)
+                        }
                     }
                 }
             }
@@ -214,30 +230,33 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             val selected = node.prop("selected")?.toIntOrNull() ?: -1
             val enabled = node.prop(PropKey.ENABLED) != "false"
             var expanded by remember(nodeId) { mutableStateOf(false) }
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { if (enabled) expanded = it }
-            ) {
-                OutlinedTextField(
-                    value = if (selected >= 0 && selected < options.size) options[selected] else "",
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = enabled,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
-                )
-                ExposedDropdownMenu(
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onDismissRequest = { expanded = false }
+                    onExpandedChange = { if (enabled) expanded = it }
                 ) {
-                    options.forEachIndexed { index, label ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                expanded = false
-                                AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
-                            }
-                        )
+                    OutlinedTextField(
+                        value = if (selected >= 0 && selected < options.size) options[selected] else "",
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = enabled,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        options.forEachIndexed { index, label ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    expanded = false
+                                    AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -249,44 +268,53 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             val enabled = node.prop(PropKey.ENABLED) != "false"
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = maxOf(0, selected))
             val itemHeightDp = 48.dp
-            Box(modifier = Modifier.height(itemHeightDp * 3).fillMaxWidth()) {
-                LazyColumn(state = listState) {
-                    itemsIndexed(options) { index, label ->
-                        Box(
-                            modifier = Modifier
-                                .height(itemHeightDp)
-                                .fillMaxWidth()
-                                .clickable(enabled = enabled) {
-                                    AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = label,
-                                fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
-                            )
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier
+                    .height(itemHeightDp * 3)
+                    .fillMaxWidth()
+                ) {
+                    LazyColumn(state = listState) {
+                        itemsIndexed(options) { index, label ->
+                            Box(
+                                modifier = Modifier
+                                    .height(itemHeightDp)
+                                    .fillMaxWidth()
+                                    .clickable(enabled = enabled) {
+                                        AndroidComposeBackendHost.pushEvent(node.id, "change", index.toString())
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontWeight = if (index == selected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
                         }
                     }
                 }
             }
         }
-        
+
         WidgetType.TOGGLE_BUTTON -> {
             var checked by remember(nodeId) { mutableStateOf(node.prop(PropKey.VALUE) == "true") }
             LaunchedEffect(node.prop(PropKey.VALUE)) { checked = node.prop(PropKey.VALUE) == "true" }
             val label = node.prop(PropKey.LABEL) ?: ""
             val enabled = node.prop(PropKey.ENABLED) != "false"
-            Button(
-                onClick = {
-                    val new = !checked
-                    checked = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
-                },
-                enabled = enabled,
-                colors = if (checked) ButtonDefaults.buttonColors()
-                         else ButtonDefaults.outlinedButtonColors()
-            ) {
-                Text(label)
+
+            Measured(node.id) {
+                Button(
+                    onClick = {
+                        val new = !checked
+                        checked = new
+                        AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
+                    },
+                    enabled = enabled,
+                    colors = if (checked) ButtonDefaults.buttonColors()
+                             else ButtonDefaults.outlinedButtonColors()
+                ) {
+                    Text(label)
+                }
             }
         }
 
@@ -294,79 +322,112 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             var checked by remember(nodeId) { mutableStateOf(node.prop(PropKey.VALUE) == "true") }
             LaunchedEffect(node.prop(PropKey.VALUE)) { checked = node.prop(PropKey.VALUE) == "true" }
             val enabled = node.prop(PropKey.ENABLED) != "false"
-            Checkbox(
-                checked = checked,
-                onCheckedChange = { new ->
-                    checked = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
-                },
-                enabled = enabled
-            )
+            val label = node.prop(PropKey.LABEL) ?: ""
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(label)
+                    Checkbox(
+                        checked = checked,
+                        onCheckedChange = { new ->
+                            checked = new
+                            AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
+                        },
+                        enabled = enabled
+                    )
+                }
+            }
         }
 
         WidgetType.SWITCH -> {
             var checked by remember(nodeId) { mutableStateOf(node.prop(PropKey.VALUE) == "true") }
             LaunchedEffect(node.prop(PropKey.VALUE)) { checked = node.prop(PropKey.VALUE) == "true" }
             val enabled = node.prop(PropKey.ENABLED) != "false"
-            Switch(
-                checked = checked,
-                onCheckedChange = { new ->
-                    checked = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
-                },
-                enabled = enabled
-            )
+            val label = node.prop(PropKey.LABEL) ?: ""
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(label)
+                    Switch(
+                        checked = checked,
+                        onCheckedChange = { new ->
+                            checked = new
+                            AndroidComposeBackendHost.pushEvent(node.id, "toggle", new.toString())
+                        },
+                        enabled = enabled
+                    )
+                }
+            }
         }
-        
+
         WidgetType.SECURE_FIELD -> {
             var draft by remember(nodeId) { mutableStateOf("") }
             val enabled = node.prop(PropKey.ENABLED) != "false"
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { new ->
-                    draft = new
-                    AndroidComposeBackendHost.pushEvent(node.id, "change", new)
-                },
-                label = { node.prop(PropKey.PLACEHOLDER)?.let { Text(it) } },
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth()
-            )
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { new ->
+                        draft = new
+                        AndroidComposeBackendHost.pushEvent(node.id, "change", new)
+                    },
+                    label = { node.prop(PropKey.PLACEHOLDER)?.let { Text(it) } },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
-        
+
         WidgetType.PROGRESS_SPINNER -> {
             val widthDp = node.properties["width"]?.toIntOrNull()
             val heightDp = node.properties["height"]?.toIntOrNull()
-            val modifier = if (widthDp != null && heightDp != null)
+            val sizeModifier = if (widthDp != null && heightDp != null)
                 Modifier.size(widthDp.dp, heightDp.dp)
             else
                 Modifier
-            CircularProgressIndicator(modifier = modifier)
+
+            Measured(node.id) {
+                CircularProgressIndicator(modifier = sizeModifier)
+            }
         }
-        
+
         WidgetType.DATE_PICKER -> {
-            val enabled = node.prop(PropKey.ENABLED) != "false"
             val currentMs = node.prop(PropKey.VALUE)?.toDoubleOrNull()
                 ?.let { (it * 1000).toLong() }
                 ?: System.currentTimeMillis()
             val datePickerState = rememberDatePickerState(initialSelectedDateMillis = currentMs)
+            // Skip the first emission so we don't fire a "change" on initial
+            // composition — that would update Swift's @State date, trigger a
+            // full re-render, and cause the VStack to compute wrong positions.
+            var initialized by remember(nodeId) { mutableStateOf(false) }
             LaunchedEffect(datePickerState.selectedDateMillis) {
+                if (!initialized) { initialized = true; return@LaunchedEffect }
                 datePickerState.selectedDateMillis?.let { ms ->
                     AndroidComposeBackendHost.pushEvent(
                         node.id, "change", (ms / 1000.0).toString()
                     )
                 }
             }
-            DatePicker(
-                state = datePickerState,
-                modifier = Modifier.fillMaxWidth()
-            )
+
+            Measured(node.id, Modifier.fillMaxWidth()) {
+                DatePicker(
+                    state = datePickerState,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
-        
+
         WidgetType.SCROLL_CONTAINER -> {
             val scrollH = node.prop("scrollH") == "true"
-            val scrollV = node.prop("scrollV") != "false" // default vertical
+            val scrollV = node.prop("scrollV") != "false"
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -385,7 +446,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
                 val registeredParent = AndroidComposeBackendHost.nodeParent[childId]
                 if (registeredParent != null && registeredParent != nodeId) return@forEachIndexed
                 val (x, y) = node.childPositions[index] ?: (0 to 0)
-                Box(modifier = Modifier.offset(x.dp, y.dp)) {
+                Box(modifier = Modifier.absoluteOffset(x.dp, y.dp)) {
                     RenderNode(childId, nodes)
                 }
             }
@@ -408,3 +469,30 @@ private fun parseColor(hex: String): Color? = runCatching {
         else -> null
     }
 }.getOrNull()
+
+/**
+ * Measures [content] synchronously during Compose's layout phase via
+ * SubcomposeLayout, then reports the dp size to Swift via a "measured" event.
+ */
+@Composable
+private fun Measured(nodeId: Int, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val density = LocalDensity.current.density
+    SubcomposeLayout(modifier = modifier) { constraints ->
+        val placeable = subcompose(nodeId, content).first().measure(constraints)
+        val wDp = (placeable.width / density).toInt()
+        val hDp = (placeable.height / density).toInt()
+        AndroidComposeBackendHost.pushEvent(nodeId, "measured", "$wDp,$hDp")
+        layout(
+            width = placeable.width.coerceIn(
+                constraints.minWidth,
+                constraints.maxWidth
+            ),
+            height = placeable.height.coerceIn(
+                constraints.minHeight,
+                constraints.maxHeight
+            )
+        ) {
+            placeable.place(0, 0)
+        }
+    }
+}
