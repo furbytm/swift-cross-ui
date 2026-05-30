@@ -37,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.core.view.ViewCompat
 
 data class TabItem(
     val label: String,
@@ -71,6 +72,11 @@ class AndroidComposeBackendActivity : com.example.helloworld.MainActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidComposeBackendHost.initialize(this)
         super.onCreate(savedInstanceState)
+        
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+            AndroidComposeBackendHost.windowInsets = insets
+            insets
+        }
 
         setContent {
           val context = this
@@ -118,8 +124,10 @@ class AndroidComposeBackendActivity : com.example.helloworld.MainActivity() {
     fun setRootNode(id: Int) = AndroidComposeBackendHost.setRootNode(id)
     fun removeNode(id: Int) = AndroidComposeBackendHost.removeNode(id)
     fun clearAll() = AndroidComposeBackendHost.clearAll()
+    fun measureWidget(id: Int): String = AndroidComposeBackendHost.measureWidget(id)
     fun measureText(text: String, fontSizeSp: Float, maxWidthDp: Int): String = AndroidComposeBackendHost.measureText(text, fontSizeSp, maxWidthDp)
     fun getTextFieldValue(id: Int): String = AndroidComposeBackendHost.getTextFieldValue(id)
+    fun getWindowInsets(): String = AndroidComposeBackendHost.getWindowInsets()
 }
 
 /**
@@ -167,7 +175,7 @@ private fun AndroidComposeBackendRoot() {
                 else                       -> -1
             }
             
-            if (resolvedRootId != -1) {
+            if (resolvedRootId != -1 && AndroidComposeBackendHost.treeReady) {
                 // FOR DEBUGGING SWIFT UI RENDERING:
                 // Column {
                 //     Text("swift render debug: rootId=$resolvedRootId nodes=${nodes.size}")

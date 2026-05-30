@@ -129,6 +129,9 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     // Event handler registry — keyed by widget ID
     private var handlers: [Int32: EventHandlers] = [:]
     
+    // Parent widgets.
+    private var nodeParent: [Int32: Int32] = [:]
+  
     // Children widgets.
     private var children: [Int32: [Int32]] = [:]
 
@@ -253,9 +256,15 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         let density = Double(metrics.density)
         let widthDp = Int((Double(metrics.widthPixels) / density).rounded(.down))
         let heightDp = Int((Double(metrics.heightPixels) / density).rounded(.down))
-        // Subtract status bar (156px) and nav bar (72px) converted to dp
-        let statusBarDp = Int((156.0 / density).rounded(.down))
-        let navBarDp = Int((72.0 / density).rounded(.down))
+        let insets = (try? bridge.getWindowInsets()) ?? (statusBar: 0, navBar: 0)
+        // Fall back to known values if insets not yet available
+        let statusBarDp = insets.statusBar > 0
+            ? Int((Double(insets.statusBar) / density).rounded(.down))
+            : Int((156.0 / density).rounded(.down))
+        let navBarDp = insets.navBar > 0
+            ? Int((Double(insets.navBar) / density).rounded(.down))
+            : Int((72.0 / density).rounded(.down))
+        log("size(ofWindow) density=\(density) w=\(widthDp) h=\(heightDp) statusBar=\(statusBarDp) navBar=\(navBarDp)")
         return SIMD2(widthDp, heightDp - statusBarDp - navBarDp)
     }
   
@@ -282,6 +291,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         let container = createContainer()
         log("created container=\(container)")
         insert(child, into: container, at: 0)
+        setPosition(ofChildAt: 0, in: container, to: SIMD2(0, 0))
         window.content = container
         setRootWidget(container)
         log("setRootWidget called with container=\(container)")
@@ -294,6 +304,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setPosition(ofChildAt index: Int, in container: Widget, to position: SIMD2<Int>) {
+        log("setPosition: child[\(index)] in container=\(container) → \(position.x), \(position.y)")
         guard position.x >= 0, position.x < 100_000,
               position.y >= 0, position.y < 100_000 else {
             log("setPosition: skipping bogus position for container=\(container) pos=\(position)")
@@ -303,7 +314,19 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
 
     public func setChildren(_ children: [Widget], ofContainer container: Widget) {
+        if children.contains(1) {
+            log("setChildren: node 1 is being placed in container \(container) with children \(children)")
+        }
+      
+        // Unregister old children's parent
+        for child in self.children[container, default: []] {
+            nodeParent.removeValue(forKey: child)
+        }
         self.children[container] = children
+        // Register new children's parent
+        for child in children {
+            nodeParent[child] = container
+        }
         try? bridge.setChildren(parentId: container, childIds: children)
     }
 
@@ -330,13 +353,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
   
     public func insert(_ child: Widget, into container: Widget, at index: Int) {
-        // Remove child from any existing container first
-        for (existingContainer, existingChildren) in children {
-            if existingContainer != container && existingChildren.contains(child) {
-                remove(childAt: existingChildren.firstIndex(of: child)!, from: existingContainer)
-            }
-        }
-        
+        log("insert: child=\(child) into=\(container) at=\(index) [oldParent=\(nodeParent[child] ?? -1)]")
         var current = children[container, default: []]
         current.removeAll { $0 == child }
         current.insert(child, at: min(index, current.count))
@@ -364,7 +381,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         content: String,
         environment: EnvironmentValues
     ) {
-        updateTextView(textView, content: content, shouldWrap: false)
+        try? bridge.setProperty(id: textView, key: "text", value: content)
+        let font = environment.resolvedFont
+        try? bridge.setProperty(id: textView, key: "fontSize", value: "\(Int(font.pointSize))")
+        let weight: String
+        switch font.weight {
+            case .bold:   weight = "bold"
+            case .medium: weight = "medium"
+            case .light:  weight = "light"
+            default:      weight = "normal"
+        }
+        try? bridge.setProperty(id: textView, key: "fontWeight", value: weight)
     }
   
     public func updateTextView(_ widget: Widget, content: String, shouldWrap: Bool) {
@@ -617,11 +644,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     ) {}
   
     public func naturalSize(of widget: Widget) -> SIMD2<Int> {
-        guard let result = try? bridge.measureWidget(id: widget),
-              result.count >= 2 else {
-            return SIMD2(0, 0)
+        do {
+            let result = try bridge.measureWidget(id: widget)
+            if result.count >= 2, result[0] > 0 || result[1] > 0 {
+                log("naturalSize(\(widget)) -> \(result[0])x\(result[1])")
+                return SIMD2(Int(result[0]), Int(result[1]))
+            }
+        } catch {
+            log("naturalSize(\(widget)) -> error: \(error)")
         }
-        return SIMD2(Int(result[0]), Int(result[1]))
+        // For containers, return zero so SwiftCrossUI sizes them by their content
+        return SIMD2(0, 0)
     }
   
     public func removeAllChildren(of container: Widget) {
@@ -630,11 +663,8 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     }
   
     public func setSize(of widget: Widget, to size: SIMD2<Int>) {
-        // guard let layoutParams = widget.getLayoutParams() else { return }
-        // let density = widget.getResources().getDisplayMetrics().density
-        // layoutParams.width = Int32(Float(size.x) * density)
-        // layoutParams.height = Int32(Float(size.y) * density)
-        // widget.setLayoutParams(layoutParams)
+        try? bridge.setProperty(id: widget, key: "width", value: "\(size.x)")
+        try? bridge.setProperty(id: widget, key: "height", value: "\(size.y)")
     }
   
     public func size(

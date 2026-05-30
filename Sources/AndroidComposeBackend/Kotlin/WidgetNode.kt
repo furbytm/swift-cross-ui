@@ -47,4 +47,6 @@ object PropKey {
     const val FOREGROUND  = "foregroundColor"
     const val BACKGROUND  = "backgroundColor"
     const val ENABLED     = "enabled"
+    const val WIDTH       = "width"
+    const val HEIGHT      = "height"
 }

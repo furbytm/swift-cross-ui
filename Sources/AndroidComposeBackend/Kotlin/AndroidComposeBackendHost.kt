@@ -1,10 +1,15 @@
 package dev.swiftcrossui.compose
 
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.core.view.WindowInsetsCompat
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -26,6 +31,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
 object AndroidComposeBackendHost {
   
     var applicationContext: android.content.Context? = null
+    
+    var windowInsets: WindowInsetsCompat? = null
+    
+    var treeReady by mutableStateOf(false)
+    
+    val nodeParent: SnapshotStateMap<Int, Int> = mutableStateMapOf()
 
     val nodes: SnapshotStateMap<Int, WidgetNode> = mutableStateMapOf()
 
@@ -59,6 +70,12 @@ object AndroidComposeBackendHost {
     fun setProperty(id: Int, key: String, value: String) {
         onMain {
             val existing = nodes[id] ?: return@onMain
+            // Don't let a tiny/degenerate size overwrite a meaningful one
+            if (key == "height") {
+                val newH = value.toIntOrNull() ?: 0
+                val oldH = existing.properties["height"]?.toIntOrNull() ?: 0
+                if (newH < oldH) return@onMain
+            }
             nodes[id] = existing.copy(
                 properties = existing.properties + (key to value)
             )
@@ -73,7 +90,10 @@ object AndroidComposeBackendHost {
     fun setChildren(parentId: Int, childIds: IntArray) {
         onMain {
             val existing = nodes[parentId] ?: return@onMain
-            nodes[parentId] = existing.copy(children = childIds.toList())
+            nodes[parentId] = existing.copy(
+                children = childIds.toList(),
+                childPositions = emptyMap()
+            )
         }
     }
 
@@ -98,7 +118,22 @@ object AndroidComposeBackendHost {
      */
     @JvmStatic
     fun setRootNode(id: Int) {
-        onMain { rootNodeId = id }
+        onMain {
+            rootNodeId = id
+            // Rebuild nodeParent from final tree
+            nodeParent.clear()
+            fun traverse(nodeId: Int) {
+                val node = nodes[nodeId] ?: return
+                node.children.forEach { childId ->
+                    if (!nodeParent.containsKey(childId)) {  // first parent wins
+                        nodeParent[childId] = nodeId
+                    }
+                    traverse(childId)
+                }
+            }
+            traverse(id)
+            treeReady = true
+        }
     }
 
     /**
@@ -184,6 +219,17 @@ object AndroidComposeBackendHost {
         val node = nodes[id] ?: return "0,0"
         
         val (widthPx, heightPx) = when (node.type) {
+            WidgetType.TEXT -> {
+                val text = node.properties[PropKey.TEXT] ?: ""
+                val fontSizeSp = node.properties[PropKey.FONT_SIZE]?.toFloatOrNull() ?: 14f
+                val paint = android.text.TextPaint().apply {
+                    textSize = fontSizeSp * ctx.resources.displayMetrics.scaledDensity
+                }
+                val layout = android.text.StaticLayout.Builder
+                    .obtain(text, 0, text.length, paint, (280 * density).toInt())
+                    .build()
+                Pair((layout.getLineWidth(0) / density).toInt() + 1, (layout.height / density).toInt())
+            }
             WidgetType.BUTTON -> {
                 val paint = android.text.TextPaint().apply {
                     textSize = 14f * ctx.resources.displayMetrics.scaledDensity
@@ -208,5 +254,13 @@ object AndroidComposeBackendHost {
     @JvmStatic
     fun getTextFieldValue(id: Int): String {
         return nodes[id]?.properties[PropKey.VALUE] ?: ""
+    }
+    
+    @JvmStatic
+    fun getWindowInsets(): String {
+        val insets = windowInsets ?: return "0,0,0,0"
+        val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+        return "${status.top},${nav.bottom}"
     }
 }

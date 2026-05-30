@@ -27,8 +27,18 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
     when (node.type) {
 
         WidgetType.CONTAINER -> {
-            Box(modifier = Modifier.fillMaxSize()) {
+            val widthDp = node.properties["width"]?.toIntOrNull()
+            val heightDp = node.properties["height"]?.toIntOrNull()
+            val sizeModifier = if (widthDp != null && heightDp != null) {
+                Modifier.sizeIn(minWidth = widthDp.dp, minHeight = heightDp.dp)
+            } else {
+                Modifier.fillMaxSize()
+            }
+          
+            Box(modifier = sizeModifier) {
                 node.children.forEachIndexed { index, childId ->
+                    val registeredParent = AndroidComposeBackendHost.nodeParent[childId]
+                    if (registeredParent != null && registeredParent != nodeId) return@forEachIndexed
                     val (x, y) = node.childPositions[index] ?: (0 to 0)
                     Box(modifier = Modifier.offset(x.dp, y.dp)) {
                         RenderNode(childId, nodes)
@@ -80,6 +90,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             }
 
             OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
                 value = draft,
                 onValueChange = { new ->
                     draft = new
@@ -104,7 +115,7 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.width(280.dp),
             ) {
                 Text(node.prop(PropKey.LABEL) ?: "")
                 Switch(
@@ -141,6 +152,8 @@ fun RenderNode(nodeId: Int, nodes: Map<Int, WidgetNode>) {
         // Unknown type — render children anyway
         else -> Box {
             node.children.forEachIndexed { index, childId ->
+                val registeredParent = AndroidComposeBackendHost.nodeParent[childId]
+                if (registeredParent != null && registeredParent != nodeId) return@forEachIndexed
                 val (x, y) = node.childPositions[index] ?: (0 to 0)
                 Box(modifier = Modifier.offset(x.dp, y.dp)) {
                     RenderNode(childId, nodes)

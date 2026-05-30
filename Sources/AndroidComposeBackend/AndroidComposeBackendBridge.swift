@@ -61,6 +61,9 @@ struct AndroidComposeBackendHostClass: AnyJavaObject {
 
     @JavaMethod
     func getTextFieldValue(_ id: Int32) throws -> JavaString?
+  
+    @JavaMethod
+    func getWindowInsets() throws -> JavaString?
 }
 
 /// Thin Swift facade that converts Swift String/Int/Bool to Java types and
@@ -129,5 +132,13 @@ public final class AndroidComposeBackendBridge {
     public func getTextFieldValue(id: Int32) throws -> String {
         guard let jStr = try hostClass.getTextFieldValue(id) else { return "" }
         return jStr.toString()
+    }
+  
+    public func getWindowInsets() throws -> (statusBar: Int, navBar: Int) {
+        guard let jStr = try hostClass.getWindowInsets(),
+              let str = Optional(jStr.toString()) else { return (0, 0) }
+        let parts = str.split(separator: ",").compactMap { Int($0) }
+        guard parts.count >= 2 else { return (0, 0) }
+        return (parts[0], parts[1])
     }
 }
