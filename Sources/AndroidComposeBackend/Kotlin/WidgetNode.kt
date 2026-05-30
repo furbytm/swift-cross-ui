@@ -24,14 +24,25 @@ data class WidgetNode(
 
 /** Canonical type strings — keep in sync with ComposeBackend.swift */
 object WidgetType {
-    const val CONTAINER   = "Container"  // generic absolute-position canvas
-    const val TEXT        = "Text"
-    const val BUTTON      = "Button"
-    const val TEXT_FIELD  = "TextField"
-    const val TOGGLE      = "Toggle"
-    const val SLIDER      = "Slider"
-    const val DIVIDER     = "Divider"
-    const val IMAGE       = "Image"
+    const val CONTAINER          = "Container"
+    const val TEXT               = "Text"
+    const val BUTTON             = "Button"
+    const val TEXT_FIELD         = "TextField"
+    const val TOGGLE             = "Toggle"
+    const val SLIDER             = "Slider"
+    const val DIVIDER            = "Divider"
+    const val IMAGE              = "Image"
+    const val PICKER_RADIO_GROUP = "PickerRadioGroup"
+    const val PICKER_MENU        = "PickerMenu"
+    const val PICKER_WHEEL       = "PickerWheel"
+    const val TOGGLE_BUTTON      = "ToggleButton"
+    const val CHECKBOX           = "Checkbox"
+    const val SWITCH             = "Switch"
+    const val SECURE_FIELD       = "SecureField"
+    const val PROGRESS_SPINNER   = "ProgressSpinner"
+    const val DATE_PICKER        = "DatePicker"
+    const val SCROLL_CONTAINER   = "ScrollContainer"
+
 }
 
 /** Canonical property key strings */

@@ -243,6 +243,26 @@ object AndroidComposeBackendHost {
             WidgetType.TOGGLE    -> Pair((280 * density).toInt(), (56 * density).toInt())
             WidgetType.SLIDER    -> Pair((280 * density).toInt(), (40 * density).toInt())
             WidgetType.DIVIDER   -> Pair((280 * density).toInt(), (1  * density).toInt())
+            WidgetType.SECURE_FIELD   -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.TOGGLE_BUTTON  -> {
+                val paint = android.text.TextPaint().apply {
+                    textSize = 14f * ctx.resources.displayMetrics.scaledDensity
+                }
+                val label = node.properties[PropKey.LABEL] ?: ""
+                val textWidth = paint.measureText(label)
+                Pair((textWidth + 48 * density).toInt(), (40 * density).toInt())
+            }
+            WidgetType.SWITCH         -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.CHECKBOX       -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.PROGRESS_SPINNER -> Pair((48 * density).toInt(), (48 * density).toInt())
+            WidgetType.PICKER_MENU    -> Pair((280 * density).toInt(), (56 * density).toInt())
+            WidgetType.PICKER_RADIO_GROUP -> {
+                val options = node.properties["options"]?.split("\u001F") ?: emptyList()
+                Pair((280 * density).toInt(), (options.size * 48 * density).toInt())
+            }
+            WidgetType.PICKER_WHEEL   -> Pair((280 * density).toInt(), (144 * density).toInt())
+            WidgetType.DATE_PICKER -> Pair((280 * density).toInt(), (560 * density).toInt())
+            WidgetType.SCROLL_CONTAINER -> Pair(0, 0)
             else -> Pair(0, 0)
         }
         

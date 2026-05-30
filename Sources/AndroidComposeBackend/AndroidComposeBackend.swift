@@ -15,7 +15,7 @@ public extension ComposeWidget {
 }
 
 /// Per-widget closures registered when a widget is created.
-private struct EventHandlers {
+public struct EventHandlers {
     var onClick: (() -> Void)?
     var onChange: ((String) -> Void)?
     var onToggle: ((Bool) -> Void)?
@@ -117,17 +117,17 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     public lazy var deviceClass: DeviceClass = .phone
   
     // Shared bridge to the Kotlin host
-    private let bridge: AndroidComposeBackendBridge
+    public let bridge: AndroidComposeBackendBridge
 
     // Widget ID allocator — Swift owns this, never Kotlin
     private var nextId: Int32 = 1
-    private func allocateId() -> Int32 {
+    public func allocateId() -> Int32 {
         defer { nextId += 1 }
         return nextId
     }
 
     // Event handler registry — keyed by widget ID
-    private var handlers: [Int32: EventHandlers] = [:]
+    public var handlers: [Int32: EventHandlers] = [:]
     
     // Parent widgets.
     private var nodeParent: [Int32: Int32] = [:]
@@ -335,7 +335,7 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         bridgeCall("setRootNode \(widget)") { try bridge.setRootNode(id: widget) }
     }
 
-    private func bridgeCall(_ label: String, _ call: () throws -> Void) {
+    public func bridgeCall(_ label: String, _ call: () throws -> Void) {
         do {
             try call()
         } catch {
@@ -471,12 +471,6 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
     public func getContent(ofTextField textField: Widget) -> String {
         return (try? bridge.getTextFieldValue(id: textField)) ?? ""
     }
-
-    public func createToggle() -> Widget {
-        let id = allocateId()
-        try? bridge.createNode(id: id, type: "Toggle")
-        return id
-    }
   
     public func createToggle(
         label: String,
@@ -490,24 +484,10 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         handlers[id, default: EventHandlers()].onToggle = onChange
         return id
     }
-
-    public func updateToggle(
-        _ widget: Widget,
-        label: String,
-        environment: EnvironmentValues,
-        onChange: @escaping (Bool) -> Void
-    ) {
-        try? bridge.setProperty(id: widget, key: "label", value: label)
-        handlers[widget, default: EventHandlers()].onToggle = onChange
-    }
   
     public func updateToggle(_ widget: Widget, label: String, value: Bool) {
         try? bridge.setProperty(id: widget, key: "label", value: label)
         try? bridge.setProperty(id: widget, key: "value", value: value ? "true" : "false")
-    }
-  
-    public func setState(ofToggle toggle: Widget, to state: Bool) {
-        try? bridge.setProperty(id: toggle, key: "value", value: state ? "true" : "false")
     }
   
     public func createSlider() -> Widget {
@@ -564,6 +544,62 @@ public final class AndroidComposeBackend: BackendFeatures.BaseStubs {
         return id
     }
 
+    public func createSecureField() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "SecureField")
+        return id
+    }
+
+    public func updateSecureField(
+        _ secureField: Widget,
+        placeholder: String,
+        environment: EnvironmentValues,
+        onChange: @escaping (String) -> Void,
+        onSubmit: @escaping () -> Void
+    ) {
+        try? bridge.setProperty(id: secureField, key: "placeholder", value: placeholder)
+        try? bridge.setProperty(id: secureField, key: "enabled", value: environment.isEnabled ? "true" : "false")
+        handlers[secureField, default: EventHandlers()].onChange = onChange
+    }
+  
+    public func getContent(ofSecureField secureField: Widget) -> String {
+        return (try? bridge.getTextFieldValue(id: secureField)) ?? ""
+    }
+
+    public func setContent(ofSecureField secureField: Widget, to content: String) {
+        try? bridge.setProperty(id: secureField, key: "value", value: content)
+    }
+  
+    public func createProgressSpinner() -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "ProgressSpinner")
+        return id
+    }
+  
+    public func setSize(ofProgressSpinner widget: Widget, to size: SIMD2<Int>) {
+        try? bridge.setProperty(id: widget, key: "width", value: "\(size.x)")
+        try? bridge.setProperty(id: widget, key: "height", value: "\(size.y)")
+    }
+  
+    public func createScrollContainer(for child: Widget) -> Widget {
+        let id = allocateId()
+        try? bridge.createNode(id: id, type: "ScrollContainer")
+        insert(child, into: id, at: 0)
+        return id
+    }
+
+    public func updateScrollContainer(
+        _ scrollView: Widget,
+        environment: EnvironmentValues,
+        bounceHorizontally: Bool,
+        bounceVertically: Bool,
+        hasHorizontalScrollBar: Bool,
+        hasVerticalScrollBar: Bool
+    ) {
+        try? bridge.setProperty(id: scrollView, key: "scrollH", value: hasHorizontalScrollBar ? "true" : "false")
+        try? bridge.setProperty(id: scrollView, key: "scrollV", value: hasVerticalScrollBar ? "true" : "false")
+    }
+  
     public func destroyWidget(_ widget: Widget) {
         handlers.removeValue(forKey: widget)
         children.removeValue(forKey: widget)
